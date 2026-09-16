@@ -4,6 +4,9 @@ import InventoryView, { status, fmtQty } from './InventoryView'
 import LogView from './LogView'
 import RecordModal from './RecordModal'
 import StaffPanel from './StaffPanel'
+import ConfirmDialog from './ConfirmDialog'
+import SkeletonRows from './SkeletonRows'
+import { useToast } from './Toast'
 
 function isToday(iso){ const d=new Date(iso), t=new Date(); return d.toDateString()===t.toDateString() }
 
@@ -12,8 +15,10 @@ export default function Dashboard({ profile }) {
   const [movements, setMovements] = useState([])
   const [view, setView] = useState('inventory')
   const [modalItem, setModalItem] = useState(null)
+  const [confirmTarget, setConfirmTarget] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [errorMsg, setErrorMsg] = useState('')
+  const [loadError, setLoadError] = useState('')
+  const toast = useToast()
 
   const loadAll = useCallback(async () => {
     setLoading(true)
@@ -21,8 +26,9 @@ export default function Dashboard({ profile }) {
       const [itemRows, moveRows] = await Promise.all([getItems(), getMovements()])
       setItems(itemRows)
       setMovements(moveRows)
+      setLoadError('')
     } catch (err) {
-      setErrorMsg(err.message || 'Could not load data.')
+      setLoadError(err.message || 'Could not load data.')
     } finally {
       setLoading(false)
     }
@@ -41,7 +47,7 @@ export default function Dashboard({ profile }) {
         createdBy: profile.id,
       })
     } catch (err) {
-      setErrorMsg('Could not save the activity log entry: ' + err.message)
+      toast('Could not save the activity log entry: ' + err.message, 'error')
     }
   }
 
@@ -54,7 +60,7 @@ export default function Dashboard({ profile }) {
       await logMovement(item, type, delta, newQty, '')
       loadAll()
     } catch (err) {
-      setErrorMsg(err.message)
+      toast(err.message, 'error')
     }
   }
 
@@ -64,9 +70,10 @@ export default function Dashboard({ profile }) {
       const updated = await updateItem(item.id, { qty: newQty })
       setItems(prev => prev.map(i => i.id === item.id ? updated : i))
       await logMovement(item, 'Correction', delta, newQty, 'Manual recount')
+      toast(`${item.name} recounted to ${fmtQty(newQty)} ${item.unit}`)
       loadAll()
     } catch (err) {
-      setErrorMsg(err.message)
+      toast(err.message, 'error')
     }
   }
 
@@ -75,19 +82,25 @@ export default function Dashboard({ profile }) {
       const updated = await updateItem(item.id, { threshold: newThreshold })
       setItems(prev => prev.map(i => i.id === item.id ? updated : i))
     } catch (err) {
-      setErrorMsg(err.message)
+      toast(err.message, 'error')
     }
   }
 
-  async function handleDelete(item) {
-    if (!confirm(`Remove "${item.name}" from the stock room?`)) return
+  function requestDelete(item) {
+    setConfirmTarget(item)
+  }
+
+  async function confirmDelete() {
+    const item = confirmTarget
+    setConfirmTarget(null)
     try {
       await logMovement(item, 'Removed', -item.qty, 0, 'Item deleted from stock room')
       await deleteItem(item.id)
       setItems(prev => prev.filter(i => i.id !== item.id))
+      toast(`${item.name} removed from the stock room`)
       loadAll()
     } catch (err) {
-      setErrorMsg(err.message)
+      toast(err.message, 'error')
     }
   }
 
@@ -96,9 +109,10 @@ export default function Dashboard({ profile }) {
       const newItem = await addItem({ shopId: profile.shop_id, ...fields })
       setItems(prev => [...prev, newItem])
       await logMovement(newItem, 'Added', newItem.qty, newItem.qty, 'New item created')
+      toast(`${newItem.name} added to the stock room`)
       loadAll()
     } catch (err) {
-      setErrorMsg(err.message)
+      toast(err.message, 'error')
     }
   }
 
@@ -115,10 +129,16 @@ export default function Dashboard({ profile }) {
       setItems(prev => prev.map(i => i.id === item.id ? updated : i))
       await logMovement(item, type, +(newQty - before).toFixed(2), newQty, note)
       setModalItem(null)
+      toast(`${type} recorded for ${item.name}`)
       loadAll()
     } catch (err) {
-      setErrorMsg(err.message)
+      toast(err.message, 'error')
     }
+  }
+
+  function handleSignOut() {
+    toast('Signed out')
+    signOut()
   }
 
   const low = items.filter(i => status(i) === 'low')
@@ -134,7 +154,7 @@ export default function Dashboard({ profile }) {
         </div>
         <div className="header-right">
           <div className="who-am-i">{profile.full_name || profile.role}<br/>{profile.role}</div>
-          <button className="btn-signout" onClick={signOut}>Log out</button>
+          <button className="btn-signout" onClick={handleSignOut}>Log out</button>
         </div>
       </header>
 
@@ -157,29 +177,39 @@ export default function Dashboard({ profile }) {
         {view !== 'staff' && (
           <aside className="sidebar">
             <h2>Pinned — needs reorder</h2>
-            {low.length === 0
-              ? <div className="pin-empty">Nothing urgent. Stock looks healthy.</div>
-              : low.map(i => (
-                  <div className="pin" key={i.id}>
-                    <div className="pin-name">{i.name}</div>
-                    <div className="pin-detail">{fmtQty(i.qty)} / {fmtQty(i.threshold)} {i.unit}</div>
-                  </div>
-                ))
-            }
+            {loading ? (
+              <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                <div className="skeleton-bar" style={{ height:52 }} />
+                <div className="skeleton-bar" style={{ height:52 }} />
+              </div>
+            ) : low.length === 0 ? (
+              <div className="pin-empty">Nothing urgent. Stock looks healthy.</div>
+            ) : (
+              low.map(i => (
+                <div className="pin" key={i.id}>
+                  <div className="pin-name">{i.name}</div>
+                  <div className="pin-detail">{fmtQty(i.qty)} / {fmtQty(i.threshold)} {i.unit}</div>
+                </div>
+              ))
+            )}
           </aside>
         )}
 
         <main className="main">
-          {errorMsg && <div className="auth-error" style={{marginBottom:16}}>{errorMsg}</div>}
-          {loading ? (
-            <div className="empty-state">Loading…</div>
-          ) : view === 'inventory' ? (
+          {loadError && (
+            <div className="empty-state">
+              Couldn't load your stock room: {loadError}. <button className="record-btn" onClick={loadAll}>Try again</button>
+            </div>
+          )}
+          {!loadError && loading ? (
+            <SkeletonRows count={5} />
+          ) : loadError ? null : view === 'inventory' ? (
             <InventoryView
               items={items}
               onQuickAdjust={handleQuickAdjust}
               onCorrection={handleCorrection}
               onThresholdChange={handleThresholdChange}
-              onDelete={handleDelete}
+              onDelete={requestDelete}
               onOpenRecordModal={setModalItem}
               onAddItem={handleAddItem}
             />
@@ -195,6 +225,17 @@ export default function Dashboard({ profile }) {
 
       {modalItem && (
         <RecordModal item={modalItem} onClose={()=>setModalItem(null)} onSave={handleModalSave} />
+      )}
+
+      {confirmTarget && (
+        <ConfirmDialog
+          title="Remove this item?"
+          message={`"${confirmTarget.name}" will be removed from the stock room. This can't be undone, though the removal itself stays in the activity log.`}
+          confirmLabel="Remove"
+          danger
+          onConfirm={confirmDelete}
+          onCancel={() => setConfirmTarget(null)}
+        />
       )}
     </div>
   )

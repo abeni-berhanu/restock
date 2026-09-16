@@ -53,7 +53,7 @@ export default function App() {
 
   // Still checking whether a session exists at all
   if (session === undefined) {
-    return <div className="center-loading">Loading Restock…</div>
+    return <div className="center-loading"><p className="display">Restock</p></div>
   }
 
   // Logged out — an invite link takes priority over the normal login/signup toggle
@@ -73,7 +73,7 @@ export default function App() {
 
   // Logged in, but still fetching the profile row
   if (checkingProfile) {
-    return <div className="center-loading">Loading your shop…</div>
+    return <div className="center-loading"><p className="display">Restock</p></div>
   }
 
   if (profileError) {

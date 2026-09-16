@@ -1,13 +1,16 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createInvite, getInvites, revokeInvite, getTeam } from '../lib/db'
+import ConfirmDialog from './ConfirmDialog'
+import { useToast } from './Toast'
 
 export default function StaffPanel({ profile }) {
   const [team, setTeam] = useState([])
   const [invites, setInvites] = useState([])
   const [email, setEmail] = useState('')
-  const [error, setError] = useState('')
   const [sending, setSending] = useState(false)
   const [copiedId, setCopiedId] = useState(null)
+  const [revokeTarget, setRevokeTarget] = useState(null)
+  const toast = useToast()
 
   const load = useCallback(async () => {
     try {
@@ -15,34 +18,37 @@ export default function StaffPanel({ profile }) {
       setTeam(teamRows)
       setInvites(inviteRows)
     } catch (err) {
-      setError(err.message)
+      toast(err.message, 'error')
     }
-  }, [])
+  }, [toast])
 
   useEffect(() => { load() }, [load])
 
   async function handleInvite(e) {
     e.preventDefault()
-    setError('')
     if (!email.trim()) return
     setSending(true)
     try {
       await createInvite({ shopId: profile.shop_id, email, invitedBy: profile.id })
+      toast(`Invite created for ${email}`)
       setEmail('')
       load()
     } catch (err) {
-      setError(err.message)
+      toast(err.message, 'error')
     } finally {
       setSending(false)
     }
   }
 
-  async function handleRevoke(id) {
+  async function confirmRevoke() {
+    const inv = revokeTarget
+    setRevokeTarget(null)
     try {
-      await revokeInvite(id)
+      await revokeInvite(inv.id)
+      toast(`Invite to ${inv.email} revoked`)
       load()
     } catch (err) {
-      setError(err.message)
+      toast(err.message, 'error')
     }
   }
 
@@ -94,8 +100,6 @@ export default function StaffPanel({ profile }) {
         </button>
       </form>
 
-      {error && <div className="auth-error" style={{ marginBottom:16 }}>{error}</div>}
-
       {pending.length === 0 ? (
         <div className="empty-state">No pending invites.</div>
       ) : (
@@ -111,10 +115,21 @@ export default function StaffPanel({ profile }) {
               <button className="record-btn" onClick={()=>copyLink(inv.id)}>
                 {copiedId === inv.id ? 'Copied!' : 'Copy link'}
               </button>
-              <button className="del-btn" title="Revoke invite" onClick={()=>handleRevoke(inv.id)}>×</button>
+              <button className="del-btn" title="Revoke invite" onClick={()=>setRevokeTarget(inv)}>×</button>
             </div>
           </div>
         ))
+      )}
+
+      {revokeTarget && (
+        <ConfirmDialog
+          title="Revoke this invite?"
+          message={`${revokeTarget.email} won't be able to use this invite link anymore.`}
+          confirmLabel="Revoke"
+          danger
+          onConfirm={confirmRevoke}
+          onCancel={() => setRevokeTarget(null)}
+        />
       )}
     </div>
   )
