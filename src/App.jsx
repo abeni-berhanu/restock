@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { getSession, onAuthStateChange, getMyProfile, provisionShopFromMetadata } from './lib/db'
 import LoginForm from './components/LoginForm'
 import SignupForm from './components/SignupForm'
@@ -23,8 +23,20 @@ export default function App() {
     return () => sub.unsubscribe()
   }, [])
 
+  const lastUserIdRef = useRef(null)
+
   useEffect(() => {
+    const currentUserId = session?.user?.id ?? null
+
+    // Supabase silently re-checks/refreshes the session every time the tab
+    // regains focus. That fires onAuthStateChange even though it's still the
+    // same person — without this guard, we'd needlessly reload the profile
+    // (and flash the loading screen) every time someone tabs back in.
+    if (currentUserId === lastUserIdRef.current) return
+    lastUserIdRef.current = currentUserId
+
     if (!session) { setProfile(null); return }
+
     setCheckingProfile(true)
     setProfileError('')
     getMyProfile()
